@@ -10511,6 +10511,14 @@ function fb_setup() {
 // INICIALIZACIÓN
 // =============================================================================
 window.onload = function() {
+    // Intro overlay: ocultar tras 5 segundos o al hacer click (al inicio para que nunca se quede bloqueado)
+    const intro = document.getElementById('intro-overlay');
+    if (intro) {
+        const hideIntro = () => { if(!intro.classList.contains('fade-out')){ intro.classList.add('fade-out'); setTimeout(()=>{ if(intro.parentNode) intro.style.display='none'; },1000); } };
+        setTimeout(hideIntro, 5000);
+        document.addEventListener('click', hideIntro, {once:true});
+    }
+
     [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')).map(el => new bootstrap.Tooltip(el));
 
     document.getElementById('examCourseInput').value    = examState.course;
@@ -10959,14 +10967,6 @@ window.onload = function() {
         if (document.getElementById('inst_relacion').classList.contains('active')) inst_renderMatrix();
         if (document.getElementById('inst_eval').classList.contains('active')) inst_renderEvaluation();
     });
-
-    // Intro overlay
-    const intro = document.getElementById('intro-overlay');
-    if (intro) {
-        const hideIntro = () => { if(!intro.classList.contains('fade-out')){ intro.classList.add('fade-out'); setTimeout(()=>{ if(intro.parentNode) intro.style.display='none'; },1000); } };
-        setTimeout(hideIntro, 5000);
-        document.addEventListener('click', hideIntro, {once:true});
-    }
 
     // ── PONDERACIÓN ──────────────────────────────────────────────────────────
     // Tab buttons
