@@ -9,7 +9,7 @@ const BASE_PATH = './';
 // Recursos principales a cachear (rutas relativas para funcionar en GitHub Pages)
 const PRECACHE_URLS = [
     BASE_PATH,
-    BASE_PATH + 'index2.html',
+    BASE_PATH + 'index.html',
     BASE_PATH + 'manifest.json',
     BASE_PATH + 'icons/icon-192x192.png',
     BASE_PATH + 'icons/icon-512x512.png',
@@ -110,7 +110,7 @@ self.addEventListener('fetch', event => {
                 .catch(() => {
                     // Si no hay red, servir desde caché
                     return caches.match(request)
-                        .then(cached => cached || caches.match(BASE_PATH + 'index2.html'));
+                        .then(cached => cached || caches.match(BASE_PATH + 'index.html'));
                 })
         );
         return;
