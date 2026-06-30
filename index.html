@@ -3838,6 +3838,40 @@ function readJSONFile(file, cb) {
     reader.readAsText(file);
 }
 
+/**
+ * Valida que un objeto JSON tiene el formato esperado para un tipo de dato.
+ * Devuelve { ok: true } o { ok: false, msg: 'mensaje de error' }.
+ * @param {object} data - Objeto parsed del JSON
+ * @param {string} expectedType - 'examConfig', 'testConfig', 'genericConfig', 'examScores', 'testScores', 'genericScores', 'instMatrix', 'instEval', 'rubricConfig', 'rubricData', 'pondConfig', 'pondImport'
+ */
+function validateJsonFormat(data, expectedType) {
+    if (!data || typeof data !== 'object') return { ok: false, msg: 'El archivo no contiene un objeto JSON válido.' };
+    const has = (k) => k in data;
+    const isArr = (k) => Array.isArray(data[k]);
+    const isStr = (k) => typeof data[k] === 'string';
+    const isNum = (k) => typeof data[k] === 'number';
+    const isObj = (k) => data[k] && typeof data[k] === 'object' && !Array.isArray(data[k]);
+    const validators = {
+        examConfig:    () => (has('examName') && isArr('questions')) || 'Se esperaba un archivo de configuración de Examen por preguntas (campos: examName, questions, globalCriteria, students).',
+        testConfig:    () => (has('totalQuestions') && isArr('globalCriteria')) || 'Se esperaba un archivo de configuración de Examen tipo test (campos: examName, totalQuestions, globalCriteria, students).',
+        genericConfig: () => (has('examName') && isArr('globalCriteria')) || 'Se esperaba un archivo de configuración de Actividad por criterios (campos: examName, globalCriteria, students).',
+        examScores:    () => (has('examName') && isArr('students') && isArr('questions') && isArr('scores')) || 'Se esperaba un archivo de calificaciones de Examen por preguntas (campos: examName, students, questions, scores).',
+        testScores:    () => (has('examName') && isArr('students') && isArr('studentScores') && has('totalQuestions')) || 'Se esperaba un archivo de calificaciones de Examen tipo test (campos: examName, students, studentScores, totalQuestions).',
+        genericScores: () => (has('examName') && isArr('students') && isArr('scores') && isArr('criteria')) || 'Se esperaba un archivo de calificaciones de Actividad por criterios (campos: examName, students, criteria, scores).',
+        instMatrix:    () => (isArr('matrix')) || 'Se esperaba un archivo de matriz de relación Instrumentos/Criterios (campo: matrix).',
+        instEval:      () => (isArr('students') && isArr('instruments') && isArr('evalScores')) || 'Se esperaba un archivo de calificaciones de Instrumentos (campos: students, instruments, evalScores).',
+        rubricConfig:  () => (has('evalName') && isArr('aspects')) || 'Se esperaba un archivo de configuración de Rúbrica (campos: evalName, aspects, values, students).',
+        rubricData:    () => (has('evalName') && isArr('aspects') && isArr('students')) || 'Se esperaba un archivo de datos de Rúbrica (campos: evalName, aspects, values, students, teacher, coevaluation).',
+        pondConfig:    () => (has('nombre') || has('numActividades')) || 'Se esperaba un archivo de configuración de Ponderación (campos: nombre, curso, numActividades).',
+        pondImport:    () => (isArr('actividades')) || 'Se esperaba un archivo de importación de Ponderación (campo: actividades con resultados).'
+    };
+    const validator = validators[expectedType];
+    if (!validator) return { ok: true }; // tipo desconocido: no validar
+    const result = validator();
+    if (result === true) return { ok: true };
+    return { ok: false, msg: '⚠️ Este archivo no parece ser del tipo correcto.\n\n' + result + '\n\nAsegúrate de haber exportado el archivo desde la sección correspondiente de esta aplicación.' };
+}
+
 /** Guarda datos en localStorage y muestra confirmación. */
 function localSave(key, getData) {
     if (!safeLSSet(key, JSON.stringify(getData()))) {
@@ -4460,6 +4494,9 @@ function exportAppConfig(app) {
 /** Importa configuración desde JSON para una app. */
 function importAppConfig(file, app) {
     readJSONFile(file, cfg => {
+        const expected = app === 'exam' ? 'examConfig' : (app === 'test' ? 'testConfig' : 'genericConfig');
+        const v = validateJsonFormat(cfg, expected);
+        if (!v.ok) return alert(v.msg);
         if (app === 'exam') {
             if (!cfg.examName || !Array.isArray(cfg.questions)) throw new Error('Formato inválido');
             Object.assign(examState, { examName:cfg.examName, course:cfg.course||examState.course, questions:cfg.questions.map(q=>({id:q.id,maxScore:q.maxScore,criteriaCodes:q.criteriaCodes||[],name:q.name||'',description:q.description||''})), globalCriteria:cfg.globalCriteria||[], criteriaDescriptions:cfg.criteriaDescriptions||{}, students:(cfg.students||[]).map(s=>({id:uuid(),fullName:s.fullName})) });
@@ -4514,16 +4551,20 @@ function exportAppScores(app) {
 /** Importa calificaciones desde JSON para una app. */
 function importAppScores(file, app) {
     readJSONFile(file, data => {
+        const expected = app === 'exam' ? 'examScores' : (app === 'test' ? 'testScores' : 'genericScores');
+        const v = validateJsonFormat(data, expected);
+        if (!v.ok) return alert(v.msg);
         if (app === 'exam') {
             if (!data.examName||!Array.isArray(data.students)||!Array.isArray(data.questions)||!Array.isArray(data.scores)) throw new Error('Formato inválido');
             if ((data.students.length!==examState.students.length||data.questions.length!==examState.questions.length) && !confirm('Los datos no coinciden. ¿Continuar?')) return;
             examState.scores = data.scores; normalizeExamScores(); renderExamGradeTable();
+            fb_scheduleAutoSave('exam');
             showMessage('examGradeMessage','<i class="bi bi-check-circle"></i> Calificaciones importadas.');
         } else if (app === 'test') {
             if (!data.examName||!Array.isArray(data.students)||!Array.isArray(data.studentScores)||!data.totalQuestions) throw new Error('Formato inválido');
             if (data.students.length!==testState.students.length && !confirm('El número de alumnos no coincide. ¿Continuar?')) return;
             testState.studentScores = data.studentScores.map(ss=>({ correct:ss.correct||0, wrong:ss.wrong||0, unanswered: Math.max(0, testState.totalQuestions-(ss.correct||0)-(ss.wrong||0)) }));
-            renderTestGradeTable(); showMessage('testGradeMessage','<i class="bi bi-check-circle"></i> Calificaciones importadas.');
+            renderTestGradeTable(); fb_scheduleAutoSave('test'); showMessage('testGradeMessage','<i class="bi bi-check-circle"></i> Calificaciones importadas.');
         } else {
             if (!data.examName||!Array.isArray(data.students)||!Array.isArray(data.scores)||!Array.isArray(data.criteria)) throw new Error('Formato inválido');
             if (data.students.length!==genericState.students.length&&!confirm('Número de alumnos no coincide. ¿Continuar?')) return;
@@ -4537,6 +4578,7 @@ function importAppScores(file, app) {
             while (genericState.scores.length < genericState.students.length) genericState.scores.push(new Array(nC).fill(0));
             genericState.scores = genericState.scores.slice(0, genericState.students.length);
             normalizeGenericScores(); renderGenericGradeTable();
+            fb_scheduleAutoSave('generic');
             showMessage('genericGradeMessage','<i class="bi bi-check-circle"></i> Calificaciones importadas.');
         }
     });
@@ -4640,6 +4682,7 @@ function resetAppState(app) {
     if (app==='exam') { validateExamCriteria(); updateExamConfigWarning(); }
     if (app==='test') updateTestConfigWarning();
     if (app==='generic') updateGenericConfigWarning();
+    fb_scheduleAutoSave(app);
     alert('✅ Datos reiniciados.');
 }
 
@@ -4803,7 +4846,8 @@ function renderExamQuestionsTable() {
             const i = parseInt(this.dataset.qidx);
             if (examState.questions[i]) examState.questions[i][this.dataset.field] = this.value;
             // si cambia el nombre, refrescar tabla de calificación si está visible
-            if (this.dataset.field === 'name' && document.getElementById('examScreenGrade').classList.contains('active')) renderExamGradeTable();
+            if (this.dataset.field === 'name' && document.getElementById('examScreenGrade')?.classList.contains('active')) renderExamGradeTable();
+            fb_scheduleAutoSave('exam');
         });
     });
     tbody.querySelectorAll('.max-score-input').forEach(inp => {
@@ -4815,6 +4859,8 @@ function renderExamQuestionsTable() {
             if (examState.questions[i]) examState.questions[i].maxScore = val;
             this.value = formatGradeDisplay(val);
             renderExamScoreTotals();
+            normalizeExamScores();
+            updateExamConfigWarning();
         });
     });
     tbody.querySelectorAll('.assign-criteria-btn').forEach(btn => btn.addEventListener('click', function() {
@@ -4829,14 +4875,14 @@ function renderExamQuestionsTable() {
         examState.questions.splice(i+1, 0, {id:newId, maxScore:10, criteriaCodes:[], name:'', description:''});
         examState.scores.forEach(row => row.splice(i+1, 0, 0));
         reorderExamQuestionIds(); normalizeExamScores(); renderExamQuestionsTable();
-        document.getElementById('examInputNumQuestions').value = examState.questions.length; validateExamCriteria();
+        document.getElementById('examInputNumQuestions').value = examState.questions.length; validateExamCriteria(); updateExamConfigWarning();
     }));
     tbody.querySelectorAll('.delete-question-btn').forEach(btn => btn.addEventListener('click', function() {
         const i = parseInt(this.dataset.index);
         if (examState.questions.length <= 1 && !confirm('¿Eliminar la última pregunta?')) return;
         examState.questions.splice(i,1); examState.scores.forEach(row => row.splice(i,1));
         reorderExamQuestionIds(); normalizeExamScores(); renderExamQuestionsTable();
-        document.getElementById('examInputNumQuestions').value = examState.questions.length; validateExamCriteria();
+        document.getElementById('examInputNumQuestions').value = examState.questions.length; validateExamCriteria(); updateExamConfigWarning();
     }));
     renderExamScoreTotals();
 }
@@ -4972,7 +5018,8 @@ function renderExamGradeTable() {
 function renderExamStudentTags() {
     renderStudentTags(examState, 'examStudentTags', 'examStudentCountBadge', () => {
         sortStudents(examState,'scores'); normalizeExamScores(); renderExamStudentTags();
-        if (currentApp==='exam' && document.getElementById('examScreenGrade').classList.contains('active')) renderExamGradeTable();
+        if (currentApp==='exam' && document.getElementById('examScreenGrade')?.classList.contains('active')) renderExamGradeTable();
+        updateExamConfigWarning();
     });
 }
 
@@ -5063,7 +5110,8 @@ function renderTestStudentTags() {
         sortStudents(testState, 'studentScores');
         testState.studentScores = testState.studentScores.map(ss => ({...ss, unanswered: testState.totalQuestions-(ss.correct||0)-(ss.wrong||0)}));
         renderTestStudentTags();
-        if (currentApp==='test' && document.getElementById('testScreenGrade').classList.contains('active')) renderTestGradeTable();
+        if (currentApp==='test' && document.getElementById('testScreenGrade')?.classList.contains('active')) renderTestGradeTable();
+        updateTestConfigWarning();
     });
 }
 
@@ -5120,7 +5168,8 @@ function renderGenericGradeTable() { renderSimpleGradeTable(genericState, 'gener
 function renderGenericStudentTags() {
     renderStudentTags(genericState,'genericStudentTags','genericStudentCountBadge',() => {
         sortStudents(genericState,'scores'); normalizeGenericScores(); renderGenericStudentTags();
-        if (currentApp==='generic' && document.getElementById('genericScreenGrade').classList.contains('active')) renderGenericGradeTable();
+        if (currentApp==='generic' && document.getElementById('genericScreenGrade')?.classList.contains('active')) renderGenericGradeTable();
+        updateGenericConfigWarning();
     });
 }
 
@@ -5148,8 +5197,11 @@ function inst_recalcLastWeight() {
 const inst_maxWeightForEditable = () => 100 - (instrumentState.instruments.length - 1) * 1;
 
 function inst_syncPesosBadge() {
-    const badge = document.getElementById('inst_evalPesosBadge'); if (badge) badge.textContent = '100%';
-    const totalSpan = document.getElementById('inst_totalPesos'); if (totalSpan) totalSpan.textContent = '100.0';
+    const sum = instrumentState.instruments.reduce((s,i) => s + (i.weight || 0), 0);
+    const badge = document.getElementById('inst_evalPesosBadge'); if (badge) badge.textContent = sum.toFixed(0) + '%';
+    const totalSpan = document.getElementById('inst_totalPesos'); if (totalSpan) totalSpan.textContent = sum.toFixed(1);
+    const warn = document.getElementById('inst_pesosWarning');
+    if (warn) warn.style.display = Math.abs(sum - 100) > 0.5 ? '' : 'none';
 }
 
 /** Tags de alumnos para Instrumentos: usa renderStudentTags con instrumentState. */
@@ -5264,7 +5316,7 @@ function inst_renderMatrix() {
             cell.addEventListener('click',function(){
                 this.classList.toggle('selected');
                 instrumentState.matrix[parseInt(this.dataset.instr)][parseInt(this.dataset.crit)]=this.classList.contains('selected');
-                inst_renderMatrix(); inst_updateIrEvalButton();
+                inst_renderMatrix(); inst_updateIrEvalButton(); fb_scheduleAutoSave('instrumentos');
             });
             td.appendChild(cell); tr.appendChild(td);
         }
@@ -5409,7 +5461,7 @@ function inst_renderEvaluation() {
         inst_recalcLastWeight();
         const lastEval=document.querySelector(`.inst-eval-weight-input[data-i="${nI-1}"]`); if(lastEval) lastEval.value=instrumentState.evalWeights[nI-1].toFixed(2);
         const lastCfg=document.querySelector(`#inst_instrumentsBody input[data-idx="${nI-1}"][data-field="weight"]`); if(lastCfg) lastCfg.value=instrumentState.instruments[nI-1].weight.toFixed(2);
-        inst_syncPesosBadge(); inst_updateAllCriteria();
+        inst_syncPesosBadge(); inst_updateAllCriteria(); fb_scheduleAutoSave('instrumentos');
     }));
     inst_updateAllCriteria();
     // Copy row: first instrument → rest for same student (inst)
@@ -5434,6 +5486,7 @@ function inst_renderEvaluation() {
             if (!instrumentState.evalScores[sIdx]) instrumentState.evalScores[sIdx]=[];
             instrumentState.evalScores[sIdx][0] = clampedVal;
             inst_updateAllCriteria();
+            fb_scheduleAutoSave('instrumentos');
         });
     });
     // Copy column: first student → rest for same instrument (inst)
@@ -5458,6 +5511,7 @@ function inst_renderEvaluation() {
             if (!instrumentState.evalScores[0]) instrumentState.evalScores[0]=[];
             instrumentState.evalScores[0][iIdx] = clampedVal;
             inst_updateAllCriteria();
+            fb_scheduleAutoSave('instrumentos');
         });
     });
 }
@@ -5547,13 +5601,15 @@ function inst_exportMatrix() {
 }
 function inst_importMatrix(file) {
     readJSONFile(file, data => {
+        const v = validateJsonFormat(data, 'instMatrix');
+        if (!v.ok) return alert(v.msg);
         if (!data.matrix || !Array.isArray(data.matrix)) return alert('El archivo no contiene una matriz válida.');
         if(data.matrix.length!==instrumentState.instruments.length) return alert('El número de instrumentos no coincide.');
-        instrumentState.matrix=data.matrix; inst_renderMatrix(); inst_updateIrEvalButton(); alert('✅ Matriz importada.');
+        instrumentState.matrix=data.matrix; inst_renderMatrix(); inst_updateIrEvalButton(); fb_scheduleAutoSave('instrumentos'); alert('✅ Matriz importada.');
     });
 }
 function inst_saveMatrixLocal() { localSave('inst_matrix_backup', ()=>({matrix:instrumentState.matrix})); }
-function inst_loadMatrixLocal() { localLoad('inst_matrix_backup', data=>{ if(!data.matrix||!Array.isArray(data.matrix)){alert('Matriz no válida.');return;} instrumentState.matrix=data.matrix; inst_renderMatrix(); inst_updateIrEvalButton(); alert('✅ Matriz cargada.'); }); }
+function inst_loadMatrixLocal() { localLoad('inst_matrix_backup', data=>{ if(!data.matrix||!Array.isArray(data.matrix)){alert('Matriz no válida.');return;} instrumentState.matrix=data.matrix; inst_renderMatrix(); inst_updateIrEvalButton(); fb_scheduleAutoSave('instrumentos'); alert('✅ Matriz cargada.'); }); }
 
 // Guardar la matriz de relación Instrumentos/Criterios en la nube (Firebase)
 function inst_saveMatrixCloud() {
@@ -5673,6 +5729,8 @@ function inst_exportEvalJson() {
 }
 function inst_importEvalJson(file) {
     readJSONFile(file, data => {
+        const v = validateJsonFormat(data, 'instEval');
+        if (!v.ok) return alert(v.msg);
         if(!data.students||!data.instruments||!data.evalScores) throw new Error('Formato inesperado');
         if((data.students.length!==instrumentState.students.length||data.instruments.length!==instrumentState.instruments.length)&&!confirm('Dimensiones no coinciden. ¿Continuar?')) return;
         instrumentState.evalScores=data.evalScores; instrumentState.evalWeights=data.evalWeights||instrumentState.instruments.map(i=>i.weight); instrumentState.matrix=data.matrix||instrumentState.matrix;
@@ -5717,8 +5775,11 @@ function resetInstrumentosState() {
     document.getElementById('inst_claseInput').value = '';
     document.getElementById('inst_numInstrumentos').value = instrumentState.instruments.length;
     inst_renderInstrumentsTable(); renderInstrumentosStudentTags(); inst_updateConfigButtonState();
-    if (document.getElementById('inst_relacion').classList.contains('active')) inst_renderMatrix();
-    if (document.getElementById('inst_eval').classList.contains('active')) inst_renderEvaluation();
+    if (document.getElementById('inst_relacion')?.classList.contains('active')) inst_renderMatrix();
+    if (document.getElementById('inst_eval')?.classList.contains('active')) inst_renderEvaluation();
+    safeLSRemove('inst_config_backup');
+    safeLSRemove('inst_matrix_backup');
+    fb_scheduleAutoSave('instrumentos');
     alert('✅ Datos de instrumentos reiniciados.');
 }
 
@@ -5795,7 +5856,7 @@ function pond_renderImportCards() {
                 </div>
                 <div style="flex-shrink:0; padding-bottom:2px;">
                     ${act.loaded
-                        ? `<span class="badge bg-success pond-loaded-badge"><i class="bi bi-check-circle-fill"></i> ${(act.fileName||'Cargado').substring(0,30)}</span>`
+                        ? `<span class="badge bg-success pond-loaded-badge"><i class="bi bi-check-circle-fill"></i> ${escapeHtml((act.fileName||'Cargado').substring(0,30))}</span>`
                         : `<span class="badge bg-secondary pond-loaded-badge"><i class="bi bi-x-circle"></i> Sin datos</span>`}
                 </div>
             </div>
@@ -6196,7 +6257,11 @@ function _pond_applyConfigData(data, msg) {
     alert('\u2705 ' + msg);
 }
 function pond_importConfig(file) {
-    readJSONFile(file, data => _pond_applyConfigData(data, 'Configuración importada.'));
+    readJSONFile(file, data => {
+        const v = validateJsonFormat(data, 'pondConfig');
+        if (!v.ok) return alert(v.msg);
+        _pond_applyConfigData(data, 'Configuración importada.');
+    });
 }
 function pond_saveConfigLocal() {
     localSave('pond_config_backup', () => ({ nombre: ponderacionState.nombre, curso: ponderacionState.curso, numActividades: ponderacionState.numActividades }));
@@ -6253,7 +6318,11 @@ function _pond_applyImportData(data, verb) {
     pond_updateGoResultsBtn();
 }
 function pond_importImport(file) {
-    readJSONFile(file, data => _pond_applyImportData(data, 'Importado'));
+    readJSONFile(file, data => {
+        const v = validateJsonFormat(data, 'pondImport');
+        if (!v.ok) return alert(v.msg);
+        _pond_applyImportData(data, 'Importado');
+    });
 }
 function pond_saveImportLocal() {
     const lc = ponderacionState.actividades.filter(a => a.loaded).length;
@@ -6661,6 +6730,7 @@ function rubric_renderAspects() {
             rubric_syncStructures();
             rubric_renderAspects();
             rubric_saveLocal();
+            if (document.getElementById('rubricScreenEval')?.classList.contains('active')) { rubric_renderTeacherTable(); rubric_renderCoevaluation(); }
         });
         container.appendChild(tag);
     });
@@ -6686,6 +6756,7 @@ function rubric_renderValues() {
                 rubricState.values.splice(idx, 1);
                 rubric_renderValues();
                 rubric_saveLocal();
+                if (document.getElementById('rubricScreenEval')?.classList.contains('active')) { rubric_renderTeacherTable(); rubric_renderCoevaluation(); }
             });
         }
         container.appendChild(tag);
@@ -7023,6 +7094,8 @@ function rubric_saveLocal() {
     if (!safeLSSet(RUBRIC_STORAGE_KEY, JSON.stringify(rubric_serialize()))) {
         console.warn('No se pudo guardar rúbrica (almacenamiento no disponible).');
     }
+    // Disparar autosave en la nube (fb_scheduleAutoSave comprueba _fbApplyingRemote internamente)
+    fb_scheduleAutoSave('rubricas');
 }
 function rubric_loadLocal(silent) {
     try {
@@ -7049,6 +7122,11 @@ function rubric_refreshAllUI() {
     rubric_renderAspects();
     rubric_renderValues();
     renderGlobalBadges('rubric');
+    // Re-renderizar tablas de evaluación si la pantalla está activa
+    if (document.getElementById('rubricScreenEval')?.classList.contains('active')) {
+        rubric_renderTeacherTable();
+        rubric_renderCoevaluation();
+    }
 }
 
 // === Exportar / Importar ===
@@ -7067,6 +7145,8 @@ function rubric_exportConfig() {
 }
 function rubric_importConfig(file) {
     readJSONFile(file, data => {
+        const v = validateJsonFormat(data, 'rubricConfig');
+        if (!v.ok) return alert(v.msg);
         try {
             rubricState.evalName     = data.evalName || '';
             rubricState.groupName    = data.groupName || '';
@@ -7092,6 +7172,8 @@ function rubric_exportData() {
 }
 function rubric_importData(file) {
     readJSONFile(file, data => {
+        const v = validateJsonFormat(data, 'rubricData');
+        if (!v.ok) return alert(v.msg);
         try {
             rubric_loadFromObj(data);
             rubric_refreshAllUI();
@@ -7498,7 +7580,7 @@ function generic_saveEditedTask() {
     }
     // Validar unicidad (si es nuevo o si cambió el nombre)
     if (_predefEditingTask !== newName && Object.prototype.hasOwnProperty.call(RUBRIC_PREDEFINED_TASKS, newName)) {
-        if (messageEl) messageEl.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i> Ya existe una actividad con el nombre "${newName}".`;
+        if (messageEl) messageEl.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i> Ya existe una actividad con el nombre "${escapeHtml(newName)}".`;
         return;
     }
     // Recoger criterios seleccionados
@@ -8305,6 +8387,11 @@ function fb_startLiveSave(app) {
         };
         const newRef = fbDb.ref(FB_ACTIVITIES_PATH).push(fb_cleanForFirebase(record));
         _fbLiveSaveIds[app] = newRef.key;
+        newRef.catch(err => {
+            console.error('[startLiveSave] Error creando registro live:', err);
+            delete _fbLiveSaveIds[app];
+            fb_setSyncState('error', 'Error al iniciar autoguardado');
+        });
     }
 
     // Suscribirse a cambios en este registro (para sincronización entre instancias)
@@ -8479,7 +8566,7 @@ function fb_renderActivities() {
         const appLabel = a.appLabel || FB_APP_LABELS[a.app] || a.app || '?';
         const updated = a.updatedAt ? new Date(a.updatedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
         const created = a.createdAt ? new Date(a.createdAt).toLocaleDateString('es-ES') : '—';
-        const criteriaCount = a.data?.config?.globalCriteria?.length || a.data?.globalCriteria?.length || a.data?.criteria?.length || 0;
+        const criteriaCount = a.data?.config?.globalCriteria?.length ?? a.data?.globalCriteria?.length ?? a.data?.criteria?.length ?? 0;
         const studentCount = a.data?.config?.students?.length ?? a.data?.students?.length ?? a.data?.scores?.students?.length ?? 0;
         const className = a.className || '';
         const groupColorClass = className ? `group-${groupColors[className] || 0}` : '';
@@ -8563,6 +8650,7 @@ function fb_renderActivities() {
                 childCard.querySelector('.load-btn').addEventListener('click', () => {
                     try {
                         fb_applyScores(a.app, s.data);
+                        fb_scheduleAutoSave(a.app);
                         alert(`✅ Calificaciones "${s.name}" cargadas correctamente.`);
                     } catch(e) { alert('Error al cargar calificaciones: ' + e.message); }
                 });
@@ -8826,10 +8914,14 @@ function fb_subscribeCourses() {
         }
         // Actualizar el datalist compartido con los grupos del curso activo
         fb_updateGroupsDatalist();
-        // Re-renderizar el modal de grupos si está abierto
+        // Actualizar solo la lista de grupos del modal si está abierto (sin re-render destructivo)
         const groupsModal = document.getElementById('fbGroupsModal');
         if (groupsModal && groupsModal.classList.contains('show')) {
-            fb_renderGroupsModalBody();
+            const listContainer = document.getElementById('fbGroupsListContainer');
+            if (listContainer) {
+                const course = fbAllCourses.find(c => c.id === fbCurrentCourseId);
+                listContainer.innerHTML = fb_renderGroupsList(course || {});
+            }
         }
     };
     const errCb = err => console.warn('Error suscripción cursos:', err);
@@ -8909,7 +9001,10 @@ function fb_importGroupStudentsToApp(app, groupName) {
         added++;
     });
     if (added === 0) return false;
-    state.students.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'es', { sensitivity: 'base' }));
+    // Ordenar alumnos + scores paralelos (sortStudents reordena tanto students como scores)
+    const scoresFieldMap = { exam:'scores', test:'studentScores', generic:'scores', instrumentos:'evalScores' };
+    if (scoresFieldMap[app]) sortStudents(state, scoresFieldMap[app]);
+    else state.students.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'es', { sensitivity: 'base' }));
     try {
         if (app === 'exam') { normalizeExamScores(); renderExamStudentTags(); updateExamConfigWarning(); }
         else if (app === 'test') { renderTestStudentTags(); updateTestConfigWarning(); }
@@ -9058,8 +9153,13 @@ function fb_importStudentsToGroupFromFile(courseId, groupId, file) {
     reader.onload = function(e) {
         let names = [];
         if (ext === 'json') {
-            try { names = JSON.parse(e.target.result); } catch { alert('JSON inválido.'); return; }
-            if (!Array.isArray(names)) names = Object.values(names);
+            try {
+                const data = JSON.parse(e.target.result);
+                if (Array.isArray(data)) names = data;
+                else if (Array.isArray(data.students)) names = data.students.map(s => typeof s === 'string' ? s : s.fullName);
+                else if (Array.isArray(data.alumnos)) names = data.alumnos;
+                else { alert('Formato JSON no reconocido.'); return; }
+            } catch { alert('JSON inválido.'); return; }
         } else if (['xlsx','xls'].includes(ext)) {
             try {
                 const wb = XLSX.read(e.target.result, {type:'binary'});
@@ -9112,9 +9212,12 @@ function fb_importGroupStudents(courseId, groupId) {
         }
         added++;
     });
-    state.students.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'es', { sensitivity: 'base' }));
+    // Ordenar alumnos + scores paralelos (sortStudents reordena tanto students como scores)
+    const _scoresFieldMap = { exam:'scores', test:'studentScores', generic:'scores', instrumentos:'evalScores' };
+    if (_scoresFieldMap[app]) sortStudents(state, _scoresFieldMap[app]);
+    else state.students.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'es', { sensitivity: 'base' }));
     try {
-        if (app === 'exam') { renderExamStudentTags(); updateExamConfigWarning(); }
+        if (app === 'exam') { normalizeExamScores(); renderExamStudentTags(); updateExamConfigWarning(); }
         else if (app === 'test') { renderTestStudentTags(); updateTestConfigWarning(); }
         else if (app === 'generic') { renderGenericStudentTags(); updateGenericConfigWarning(); }
         else if (app === 'instrumentos') { renderInstrumentosStudentTags(); inst_updateConfigButtonState(); }
@@ -9420,11 +9523,16 @@ function fb_importGroupsFromCourse(importAll, withStudents) {
         return;
     }
     if (!confirm(`¿Importar ${groupIdsToImport.length} grupo(s) del curso ${fromCourse.label} al curso ${toCourse.label}?\n\n${withStudents ? 'Se incluirán los alumnos.' : 'No se incluirán los alumnos (solo estructura).'}`)) return;
-    // Crear copias de los grupos en el curso destino
-    const groupsRef = fbDb.ref(`${FB_COURSES_PATH}/${fbCurrentCourseId}/groups`);
+    // Crear copias de los grupos en el curso destino (evitando duplicados por nombre)
+    const existingNames = new Set();
+    if (toCourse.groups) {
+        Object.values(toCourse.groups).forEach(g => existingNames.add((g.name || '').toLowerCase()));
+    }
     const promises = groupIdsToImport.map(gid => {
         const g = fromCourse.groups[gid];
         if (!g) return Promise.resolve();
+        // Saltar si ya existe un grupo con el mismo nombre en el curso destino
+        if (existingNames.has((g.name || '').toLowerCase())) return Promise.resolve();
         const newGroup = {
             name: g.name || 'Sin nombre',
             level: g.level || '',
@@ -9432,7 +9540,7 @@ function fb_importGroupsFromCourse(importAll, withStudents) {
             createdAt: Date.now(),
             importedFrom: fromCourse.label
         };
-        return groupsRef.push().set(newGroup);
+        return fbDb.ref(`${FB_COURSES_PATH}/${fbCurrentCourseId}/groups`).push().set(newGroup);
     });
     Promise.all(promises)
         .then(() => alert(`✅ ${groupIdsToImport.length} grupo(s) importado(s) al curso ${toCourse.label}.`))
@@ -9991,7 +10099,7 @@ function fb_confirmRename() {
         fbPendingRenameId = null;
         alert('✅ Actividad renombrada.');
     }).catch(err => {
-        if (msgEl) msgEl.innerHTML = 'Error: ' + err.message;
+        if (msgEl) msgEl.innerHTML = 'Error: ' + escapeHtml(err.message);
     });
 }
 
@@ -10170,6 +10278,7 @@ function fb_renderAppLoadList() {
             card.querySelector('.load-btn').addEventListener('click', () => {
                 try {
                     fb_applyScores(appKey, a.data);
+                    fb_scheduleAutoSave(appKey);
                     const modalEl = document.getElementById('fbAppLoadModal');
                     bootstrap.Modal.getOrCreateInstance(modalEl).hide();
                     alert(`✅ Calificaciones "${a.name}" cargadas correctamente.`);
@@ -10226,7 +10335,7 @@ function fb_renderAppLoadList() {
         const appLabel = a.appLabel || FB_APP_LABELS[a.app] || a.app || '?';
         const updated = a.updatedAt ? new Date(a.updatedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
         const created = a.createdAt ? new Date(a.createdAt).toLocaleDateString('es-ES') : '—';
-        const criteriaCount = a.data?.config?.globalCriteria?.length || a.data?.globalCriteria?.length || a.data?.criteria?.length || 0;
+        const criteriaCount = a.data?.config?.globalCriteria?.length ?? a.data?.globalCriteria?.length ?? a.data?.criteria?.length ?? 0;
         const studentCount = a.data?.config?.students?.length ?? a.data?.students?.length ?? a.data?.scores?.students?.length ?? 0;
         const className = a.className || '';
         const groupColorClass = className ? `group-${groupColors[className] || 0}` : '';
@@ -10319,6 +10428,7 @@ function fb_renderAppLoadList() {
                 childCard.querySelector('.load-btn').addEventListener('click', () => {
                     try {
                         fb_applyScores(a.app, s.data);
+                        fb_scheduleAutoSave(a.app);
                         const modalEl = document.getElementById('fbAppLoadModal');
                         bootstrap.Modal.getOrCreateInstance(modalEl).hide();
                         alert(`✅ Calificaciones "${s.name}" cargadas correctamente.`);
@@ -10472,7 +10582,7 @@ function fb_applyScores(app, data) {
             sc.students.forEach((name, idx) => {
                 const sIdx = testState.students.findIndex(s => s.fullName === name);
                 if (sIdx !== -1 && sc.studentScores[idx]) {
-                    testState.studentScores[sIdx] = { correct: sc.studentScores[idx].correct || 0, wrong: sc.studentScores[idx].wrong || 0, unanswered: sc.studentScores[idx].unanswered || 0 };
+                    testState.studentScores[sIdx] = { correct: sc.studentScores[idx].correct || 0, wrong: sc.studentScores[idx].wrong || 0, unanswered: Math.max(0, testState.totalQuestions - (sc.studentScores[idx].correct || 0) - (sc.studentScores[idx].wrong || 0)) };
                 }
             });
             renderTestGradeTable();
@@ -10550,7 +10660,11 @@ function fb_saveScoresFromApp(app) {
     if (!configId) { alert('No se pudo determinar la configuración actual.'); return; }
 
     // Buscar si ya existe una configuración en la nube con el mismo fingerprint
+    // Priorizar configs del usuario actual para no vincular calificaciones a configs ajenas
     const matchingConfigs = fbAllActivities.filter(a => a.kind === 'config' && a.app === app && fb_getConfigFingerprintForRecord(a) === configId);
+    if (matchingConfigs.length > 1) {
+        matchingConfigs.sort(a => a.createdBy === fbCurrentUser.uid ? -1 : 1);
+    }
 
     let configName = '';
     let configRef = null;
@@ -11030,8 +11144,9 @@ window.onload = function() {
             if(lastInp) lastInp.value=instrumentState.instruments[nI-1].weight.toFixed(2);
             inst_syncPesosBadge();
             instrumentState.evalWeights=instrumentState.instruments.map(i=>i.weight);
-            if(document.getElementById('inst_eval').classList.contains('active')) inst_renderEvaluation();
+            if(document.getElementById('inst_eval')?.classList.contains('active')) inst_renderEvaluation();
         }
+        fb_scheduleAutoSave('instrumentos');
     });
     document.getElementById('inst_btnAddStudent').addEventListener('click', function() {
         const input=document.getElementById('inst_studentNameInput'), name=input.value.trim(); if(!name) return;
@@ -11085,6 +11200,7 @@ window.onload = function() {
         if (!confirm('¿Borrar todas las calificaciones del examen? Los alumnos y la configuración se mantendrán.')) return;
         examState.scores = examState.students.map(() => new Array(examState.questions.length).fill(0));
         renderExamGradeTable();
+        fb_scheduleAutoSave('exam');
         showMessage('examGradeMessage', '<i class="bi bi-check-circle"></i> Calificaciones borradas.');
     });
     document.getElementById('testClearScoresBtn').addEventListener('click', function() {
@@ -11092,6 +11208,7 @@ window.onload = function() {
         if (!confirm('¿Borrar todas las calificaciones del test? Los alumnos y la configuración se mantendrán.')) return;
         testState.studentScores = testState.students.map(() => ({ correct: 0, wrong: 0, unanswered: testState.totalQuestions }));
         renderTestGradeTable();
+        fb_scheduleAutoSave('test');
         showMessage('testGradeMessage', '<i class="bi bi-check-circle"></i> Calificaciones borradas.');
     });
     document.getElementById('genericClearScoresBtn').addEventListener('click', function() {
@@ -11099,6 +11216,7 @@ window.onload = function() {
         if (!confirm('¿Borrar todas las calificaciones de la actividad? Los alumnos y la configuración se mantendrán.')) return;
         genericState.scores = genericState.students.map(() => new Array(genericState.globalCriteria.length).fill(0));
         renderGenericGradeTable();
+        fb_scheduleAutoSave('generic');
         showMessage('genericGradeMessage', '<i class="bi bi-check-circle"></i> Calificaciones borradas.');
     });
     document.getElementById('inst_clearScoresBtn').addEventListener('click', function() {
@@ -11106,6 +11224,7 @@ window.onload = function() {
         if (!confirm('¿Borrar todas las calificaciones de instrumentos? Los alumnos, instrumentos y matriz se mantendrán.')) return;
         instrumentState.evalScores = instrumentState.students.map(() => new Array(instrumentState.instruments.length).fill(0));
         inst_renderEvaluation();
+        fb_scheduleAutoSave('instrumentos');
     });
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -11346,6 +11465,7 @@ window.onload = function() {
         rubric_renderAspects();
         input.value = '';
         rubric_saveLocal();
+        if (document.getElementById('rubricScreenEval')?.classList.contains('active')) { rubric_renderTeacherTable(); rubric_renderCoevaluation(); }
     });
     document.getElementById('rubricAspectNameInput')?.addEventListener('keypress', e => {
         if (e.key === 'Enter') { e.preventDefault(); document.getElementById('rubricBtnAddAspect').click(); }
@@ -11365,6 +11485,7 @@ window.onload = function() {
         rubric_renderValues();
         input.value = '';
         rubric_saveLocal();
+        if (document.getElementById('rubricScreenEval')?.classList.contains('active')) { rubric_renderTeacherTable(); rubric_renderCoevaluation(); }
     });
     document.getElementById('rubricValueNameInput')?.addEventListener('keypress', e => {
         if (e.key === 'Enter') { e.preventDefault(); document.getElementById('rubricBtnAddValue').click(); }
