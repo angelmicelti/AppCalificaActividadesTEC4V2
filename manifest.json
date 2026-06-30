@@ -1,0 +1,55 @@
+{
+    "name": "Evaluación Criterial TEC4 — Versión Online",
+    "short_name": "EvalTEC4",
+    "description": "Sistema de evaluación criterial para Tecnología 4º ESO (LOMLOE). Permite evaluar mediante exámenes, actividades por criterios, rúbricas e instrumentos, con guardado en la nube y gestión de cursos y grupos de alumnado.",
+    "start_url": "./index2.html",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#0b4b6b",
+    "theme_color": "#0b4b6b",
+    "lang": "es",
+    "dir": "ltr",
+    "categories": ["education", "productivity"],
+    "icons": [
+        {
+            "src": "icons/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/maskable-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/maskable-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Inicio",
+            "short_name": "Inicio",
+            "description": "Pantalla principal de la app",
+            "url": "./index2.html",
+            "icons": [{ "src": "icons/icon-192x192.png", "sizes": "192x192" }]
+        }
+    ]
+}
