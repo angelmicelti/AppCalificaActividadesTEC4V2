@@ -48,7 +48,7 @@
             "name": "Inicio",
             "short_name": "Inicio",
             "description": "Pantalla principal de la app",
-            "url": "./index2.html",
+            "url": "./index.html",
             "icons": [{ "src": "icons/icon-192x192.png", "sizes": "192x192" }]
         }
     ]
