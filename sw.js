@@ -2,7 +2,7 @@
 // Cacheo de recursos para funcionamiento offline.
 // Hosting: https://angelmicelti.github.io/AppCalificaActividadesTEC4V2/
 
-const CACHE_VERSION = 'v1.2.0';
+const CACHE_VERSION = 'v1.2.3';
 const CACHE_NAME = `evaltec4-online-${CACHE_VERSION}`;
 const BASE_PATH = './';
 
